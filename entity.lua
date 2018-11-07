@@ -21,14 +21,14 @@ function Entity.new(r, x, y, color, speed)
 end
 
 local Survivor = {}
-Survivor.target_thresh = 50
+Survivor.target_thresh = 40
 setmetatable(Survivor, Entity)
 Survivor.__sub = Entity.__sub
 Survivor.__index = Survivor
 
 function Survivor.new(x, y)
     local surv = Entity.new(5, x, y, {0, 0, 1}, 40, s)
-    if math.random() < 0.4 then
+    if math.random() < 0.6 then
         surv.gun = true
     end
     surv.health = 50 + (math.random() * 50)
@@ -37,7 +37,7 @@ function Survivor.new(x, y)
 end
 
 local Zombie = {}
-Zombie.eat_threshold = 2
+Zombie.eat_threshold = 1
 Zombie.target_thresh = 200
 setmetatable(Zombie, Entity)
 Zombie.__sub = Entity.__sub
@@ -74,16 +74,7 @@ function Zombie:find_target(survivors, zombies)
             end
         end
     end
-    if not zombies then return target end
 
-    for _, ent in ipairs(zombies) do
-        if ent.target ~= self then
-            if (self - ent) < distance then
-                distance = (self - ent)
-                target = ent
-            end
-        end
-    end
     return target
 end
 
@@ -114,8 +105,8 @@ function Survivor:update_run(platform, dt, zombies)
     self.x = self.x + dx * dt
     self.y = self.y + dy * dt
 
-    self.x = math.max(0, math.max(platform.width, self.x))
-    self.y = math.max(0, math.max(platform.height, self.y))
+    self.x = math.max(0, math.min(platform.width, self.x))
+    self.y = math.max(0, math.min(platform.height, self.y))
 end
 
 function Survivor:find_target(zombies)
@@ -265,7 +256,7 @@ function Zombie:avoid(zombies)
     end
 
     local dx, dy = away(self.x, self.y, cx, cy)
-    return dx * math.random(), dy * math.random()
+    return dx * 2, dy * 2
 end
 
 -- | This is rule 1 of Boids swarming lgorithm
@@ -274,8 +265,8 @@ function Zombie:swarm(platform, dt, zombies)
     local v1dx, v1dy = self:towards(zombies)
     local v2dx, v2dy = self:avoid(zombies)
 
-    local dx = v1dx + v2dx
-    local dy = v1dy + v2dy
+    local dx = v1dx + v2dx / 2
+    local dy = v1dy + v2dy / 2
 
     self.x = math.max(0, math.min(platform.width, self.x + (dx * self.speed * dt)))
     self.y = math.max(0, math.min(platform.height, self.y + (dy * self.speed * dt)))
@@ -287,11 +278,9 @@ end
 function Zombie:update(platform, dt, zombies, survivors)
 
     if not self.target then
-        self.target = self:find_target(self, survivors, zombies)
-    elseif getmetatable(self.target.type) == Zombie and math.random() < 0.2 then
         self.target = self:find_target(self, survivors)
     end
-    if not self.target then
+    if not self.target and not self.follows then
         self:swarm(platform, dt, zombies)
         return
     end
@@ -327,7 +316,11 @@ function Zombie:update(platform, dt, zombies, survivors)
     self.x = self.x + (dx * dt)
     self.y = self.y + (dy * dt)
     
-    if self - target < Zombie.eat_threshold then
+    if not target then
+        return
+    end
+
+    if math.abs(self - target) < Zombie.eat_threshold then
         local bite = math.random() < 0.5
         if bite then
             local damage = math.random() * 30
@@ -374,23 +367,33 @@ function Player:update(platform, dt)
         dy = 0
     end
 
+    -- Infect
     local follow_thresh = 2
-    if love.keyboard.isDown('c') then
+    if love.keyboard.isDown('i') then
         for _, zomb in ipairs(platform.zombies) do
             if zomb ~= self then
-                if self - zomb < follow_thresh then
+                if math.abs(self - zomb) < follow_thresh then
                     zomb.follows = self
                 end
             end
         end
+        for i, surv in ipairs(platform.survivors) do
+            if math.abs(self - surv) < follow_thresh then
+                local zomb = Zombie.new(surv.x, surv.y)
+                table.remove(platform.survivors, i)
+                table.insert(platform.zombies, zomb)
+            end
+        end
     end
 
-    local bite_thresh = 3
-    if love.keyboard.isDown('space') then
+    -- Eat brains
+    local bite_thresh = 2
+    if love.keyboard.isDown('e') then
         for _, surv in ipairs(platform.survivors) do
-            if self - surv < bite_thresh then
+            if math.abs(self - surv) < bite_thresh then
                 local damage = 50
                 surv.health = math.max(0, surv.health - damage)
+                self.health = math.min(self.maxhealth, self.health + damage)
             end
         end
 
