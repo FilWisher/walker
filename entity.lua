@@ -21,6 +21,7 @@ function Entity.new(r, x, y, color, speed)
 end
 
 local Survivor = {}
+Survivor.target_thresh = 50
 setmetatable(Survivor, Entity)
 Survivor.__sub = Entity.__sub
 Survivor.__index = Survivor
@@ -36,6 +37,8 @@ function Survivor.new(x, y)
 end
 
 local Zombie = {}
+Zombie.eat_threshold = 2
+Zombie.target_thresh = 200
 setmetatable(Zombie, Entity)
 Zombie.__sub = Entity.__sub
 Zombie.__index = Zombie
@@ -60,7 +63,7 @@ function Entity:draw()
 end
 
 function Zombie:find_target(survivors, zombies)
-    local distance = math.huge
+    local distance = Zombie.target_thresh
     local target 
 
     for _, ent in ipairs(survivors) do
@@ -84,8 +87,8 @@ function Zombie:find_target(survivors, zombies)
     return target
 end
 
-function update_survivor_run(platform, self, dt, zombies)
-    local thresh = 100
+function Survivor:update_run(platform, dt, zombies)
+    local thresh = Survivor.target_thresh
     local target = {x=0, y=0}
     for _, zomb in ipairs(zombies) do
         if self - zomb < thresh then
@@ -95,7 +98,7 @@ function update_survivor_run(platform, self, dt, zombies)
     end
 
     local variance = 1
-    local dx
+    local dx, dy = 0, 0
     if target.x < self.x then
         dx = self.speed + variance
     elseif target.x > self.x then
@@ -111,12 +114,12 @@ function update_survivor_run(platform, self, dt, zombies)
     self.x = self.x + dx * dt
     self.y = self.y + dy * dt
 
-    self.x = math.max(0, math.min(self.x, platform.width))
-    self.y = math.max(0, math.min(self.y, platform.height))
+    self.x = math.max(0, math.max(platform.width, self.x))
+    self.y = math.max(0, math.max(platform.height, self.y))
 end
 
 function Survivor:find_target(zombies)
-    local dist = math.huge
+    local dist = Survivor.target_thresh
     local target
     for _, ent in ipairs(zombies) do
         if math.abs(self - ent) < dist then
@@ -127,7 +130,7 @@ function Survivor:find_target(zombies)
     return target
 end
 
-function update_survivor_gun(platform, self, dt, zombies, survivors)
+function Survivor:update_gun(platform, dt, zombies, survivors)
     
     if not self.target then
         self.target = self:find_target(zombies)
@@ -147,7 +150,7 @@ function update_survivor_gun(platform, self, dt, zombies, survivors)
     local dist = math.abs(self - target)
 
     if dist < danger_thresh then
-        update_survivor_run(platform, self, dt, zombies)
+        self:update_run(platform, dt, zombies)
         return
     end
 
@@ -182,12 +185,106 @@ function update_survivor_gun(platform, self, dt, zombies, survivors)
     end
 end
 
+-- | Returns a velocity that goes towards the average location of all zombies
+function Zombie:towards(zombies)
+    local cx, cy = 0, 0
+    for _, zomb in ipairs(zombies) do
+        if zomb ~= self then
+            cx = cx + zomb.x
+            cy = cy + zomb.y
+        end
+    end
+    cx = cx / #zombies
+    cy = cy / #zombies
+
+    local dx, dy = 0, 0
+    if self.x < cx then
+        dx = 1
+    elseif self.x > cx then
+        dx = -1
+    end
+    if self.y < cy then
+        dy = 1
+    elseif self.y > cy then
+        dy = -1
+    end
+    return dx, dy
+end
+
+function towards(srcX, srcY, dstX, dstY)
+    local dx, dy = 0, 0
+    if srcX < dstX then
+        dx = 1
+    elseif srcX > dstX then
+        dx = -1
+    end
+    if srcY < dstY then
+        dy = 1
+    elseif srcY > dstY then
+        dy = -1
+    end
+    return dx, dy
+end
+
+function away(srcX, srcY, dstX, dstY)
+    local dx, dy = towards(srcX, srcY, dstX, dstY)
+    if dx == 0 then
+        if math.random() < 0.5 then
+            dx = -1
+        else
+            dx = 1
+        end
+    end
+    if dy == 0 then
+        if math.random() < 0.5 then
+            dy = -1
+        else
+            dy = 1
+        end
+    end
+    return -dx, -dy
+end
+
+-- | Returns a velocity that avoids nearby zombies
+function Zombie:avoid(zombies)
+    local cx, cy, n = 0, 0, 0
+    local avoid_thresh = 10
+    for _, zomb in ipairs(zombies) do
+        if self ~= zomb then
+            if math.abs(zomb - self) < avoid_thresh then
+                cx = cx + zomb.x
+                cy = cy + zomb.y
+                n = n + 1
+            end
+        end
+    end
+
+    if n > 0 then
+        cx = cx / n
+        cy = cy / n
+    end
+
+    local dx, dy = away(self.x, self.y, cx, cy)
+    return dx * math.random(), dy * math.random()
+end
+
+-- | This is rule 1 of Boids swarming lgorithm
+function Zombie:swarm(platform, dt, zombies)
+
+    local v1dx, v1dy = self:towards(zombies)
+    local v2dx, v2dy = self:avoid(zombies)
+
+    local dx = v1dx + v2dx
+    local dy = v1dy + v2dy
+
+    self.x = math.max(0, math.min(platform.width, self.x + (dx * self.speed * dt)))
+    self.y = math.max(0, math.min(platform.height, self.y + (dy * self.speed * dt)))
+end
+
 -- Initially, just find the closest survivor and walk towards them.
 -- TODO: find closest thing. If survivor, walk towards them. If zombie, do
 --       flocking behaviour with aspects of Boids.
 function Zombie:update(platform, dt, zombies, survivors)
-
-    local eat_threshold = 2
 
     if not self.target then
         self.target = self:find_target(self, survivors, zombies)
@@ -195,6 +292,7 @@ function Zombie:update(platform, dt, zombies, survivors)
         self.target = self:find_target(self, survivors)
     end
     if not self.target then
+        self:swarm(platform, dt, zombies)
         return
     end
 
@@ -229,7 +327,7 @@ function Zombie:update(platform, dt, zombies, survivors)
     self.x = self.x + (dx * dt)
     self.y = self.y + (dy * dt)
     
-    if self - target < eat_threshold then
+    if self - target < Zombie.eat_threshold then
         local bite = math.random() < 0.5
         if bite then
             local damage = math.random() * 30
@@ -240,9 +338,9 @@ end
 
 function Survivor:update(platform, dt, zombies, survivors)
     if self.gun then
-        update_survivor_gun(platform, self, dt, zombies, survivors)
+        self:update_gun(platform, dt, zombies, survivors)
     else
-        update_survivor_run(platform, self, dt, zombies, survivors)
+        self:update_run(platform, dt, zombies, survivors)
     end
 end
 

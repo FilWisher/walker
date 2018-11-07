@@ -47,10 +47,10 @@ local outnumberedmap = {
     { z, z, z, z, z, z, z, z, z }, 
     { z, z, z, z, z, z, z, z, z }, 
     { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 
-    { s, s, s, s, s, s, s, s, s }, 
+    { s, s, 0, 0, 0, 0, 0, 0, 0 }, 
 }
 
-local testmap = outnumberedmap
+local testmap = bigmap
 
 function loadmap(platform, map, factor)
     platform.zombies = platform.zombies or {}
@@ -128,6 +128,14 @@ function love.load()
 end
 
 function love.update(dt)
+
+    if love.keyboard.isDown('p') then
+        platform.pause = not platform.pause
+    end
+
+    if platform.pause then
+        return
+    end
     
     -- Gun shots
     platform.shoot = {}
